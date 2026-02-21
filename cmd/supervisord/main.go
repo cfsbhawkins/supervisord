@@ -9,16 +9,18 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"unicode"
 
 	"github.com/jessevdk/go-flags"
 	"github.com/ochinchina/go-ini"
-	apperrors "github.com/sgaunet/supervisord/internal/errors"
 	"github.com/sgaunet/supervisord/internal/config"
 	"github.com/sgaunet/supervisord/internal/daemon"
-	"github.com/sgaunet/supervisord/internal/supervisor"
+	apperrors "github.com/sgaunet/supervisord/internal/errors"
 	"github.com/sgaunet/supervisord/internal/logger"
+	"github.com/sgaunet/supervisord/internal/rpc"
+	"github.com/sgaunet/supervisord/internal/supervisor"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -143,12 +145,71 @@ func runServer() {
 			options.Configuration, _ = findSupervisordConf()
 		}
 		s := supervisor.NewSupervisor(options.Configuration)
+
+		xmlRPC := rpc.NewXMLRPC()
+		s.OnHTTPServerStart = makeHTTPServerStartFunc(xmlRPC)
+
 		initSignals(s)
 		if _, _, _, sErr := s.Reload(true); sErr != nil {
 			panic(sErr)
 		}
 		s.WaitForExit()
 	}
+}
+
+func makeHTTPServerStartFunc(xmlRPC *rpc.XMLRPC) func(s *supervisor.Supervisor) {
+	return func(s *supervisor.Supervisor) {
+		xmlRPC.Stop()
+		startInetHTTPServer(xmlRPC, s)
+		startUnixHTTPServer(xmlRPC, s)
+	}
+}
+
+func startInetHTTPServer(xmlRPC *rpc.XMLRPC, s *supervisor.Supervisor) {
+	httpServerConfig, ok := s.GetConfig().GetInetHTTPServer()
+	if !ok {
+		return
+	}
+
+	addr := httpServerConfig.GetString("port", "")
+	if addr == "" {
+		return
+	}
+
+	cond := sync.NewCond(&sync.Mutex{})
+	cond.L.Lock()
+	defer cond.L.Unlock()
+
+	go xmlRPC.StartInetHTTPServer(
+		httpServerConfig.GetString("username", ""),
+		httpServerConfig.GetString("password", ""),
+		addr, s, cond.Signal,
+	)
+	cond.Wait()
+}
+
+func startUnixHTTPServer(xmlRPC *rpc.XMLRPC, s *supervisor.Supervisor) {
+	httpServerConfig, ok := s.GetConfig().GetUnixHTTPServer()
+	if !ok {
+		return
+	}
+
+	env := config.NewStringExpression("here", s.GetConfig().GetConfigFileDir())
+	sockFile, err := env.Eval(httpServerConfig.GetString("file", "/tmp/supervisord.sock"))
+	if err != nil {
+		return
+	}
+
+	cond := sync.NewCond(&sync.Mutex{})
+	cond.L.Lock()
+	defer cond.L.Unlock()
+
+	go xmlRPC.StartUnixHTTPServer(
+		httpServerConfig.GetString("username", ""),
+		httpServerConfig.GetString("password", ""),
+		sockFile, s, cond.Signal,
+	)
+	cond.Wait()
 }
 
 // Get the supervisord log file.

@@ -34,6 +34,9 @@ type Supervisor struct {
 	logger     logger.Logger    // logger manager
 	lock       sync.Mutex
 	restarting bool // if supervisor is in restarting state
+	// OnHTTPServerStart is called during Reload(restart=true) to start
+	// the HTTP/XMLRPC servers. Set by main.go to avoid a circular import.
+	OnHTTPServerStart func(s *Supervisor)
 }
 
 // StartProcessArgs arguments for starting a process.
@@ -514,8 +517,9 @@ func (s *Supervisor) startEventListeners() {
 }
 
 func (s *Supervisor) startHTTPServer() {
-	// NOTE: HTTP server startup has been moved to xmlrpc.go
-	// This method is temporarily stubbed out during refactoring
+	if s.OnHTTPServerStart != nil {
+		s.OnHTTPServerStart(s)
+	}
 }
 
 func (s *Supervisor) setSupervisordInfo() {
