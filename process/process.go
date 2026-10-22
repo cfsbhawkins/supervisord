@@ -314,6 +314,10 @@ func (p *Process) DoLivenessCheck() {
 	}
 }
 
+// runLoopHandoverTimeout bounds how long Start waits for a previous run loop,
+// whose program has already exited, to release the program.
+const runLoopHandoverTimeout = 10 * time.Second
+
 // Start process
 // Args:
 //
@@ -322,9 +326,27 @@ func (p *Process) Start(wait bool) {
 	log.WithFields(log.Fields{"program": p.GetName()}).Info("try to start program")
 	p.lock.Lock()
 	if p.inStart {
-		log.WithFields(log.Fields{"program": p.GetName()}).Info("Don't start program again, program is already started")
+		if p.IsRunning() || p.GetState() == Backoff {
+			log.WithFields(log.Fields{"program": p.GetName()}).Info("Don't start program again, program is already started")
+			p.lock.Unlock()
+			return
+		}
+		// The program has exited but its previous run loop has not released
+		// it yet. This is the normal window right after Stop (stopProcess
+		// followed by startProcess, or the liveness "restart" action); wait
+		// for the hand-over instead of silently dropping this start.
 		p.lock.Unlock()
-		return
+		p.waitForRunLoopExit(runLoopHandoverTimeout)
+		p.lock.Lock()
+		if p.inStart {
+			if p.IsRunning() {
+				log.WithFields(log.Fields{"program": p.GetName()}).Info("Don't start program again, program is already started")
+			} else {
+				log.WithFields(log.Fields{"program": p.GetName()}).Warn("previous run loop did not release the program in time, not started")
+			}
+			p.lock.Unlock()
+			return
+		}
 	}
 
 	p.inStart = true
@@ -347,6 +369,10 @@ func (p *Process) Start(wait bool) {
 					runCond.L.Unlock()
 				}
 			})
+			if p.stopByUser.Load() {
+				log.WithFields(log.Fields{"program": p.GetName()}).Info("program stopped by user, don't start it again")
+				break
+			}
 			// avoid print too many logs if fail to start program too quickly
 			if time.Now().Unix()-p.startTime.Unix() < 2 {
 				time.Sleep(5 * time.Second)
@@ -368,6 +394,21 @@ func (p *Process) Start(wait bool) {
 	if wait {
 		runCond.Wait()
 		runCond.L.Unlock()
+	}
+}
+
+// waitForRunLoopExit waits until the previous run loop has released the
+// program (inStart cleared) or has started it again itself, or until timeout.
+func (p *Process) waitForRunLoopExit(timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		p.lock.RLock()
+		inStart := p.inStart
+		p.lock.RUnlock()
+		if !inStart || p.IsRunning() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
