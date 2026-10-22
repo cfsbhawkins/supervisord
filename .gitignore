@@ -1,4 +1,16 @@
-/supervisord
-/supervisord.exe
-/dist
-/pidproxy
+# Claude / Anthropic / Claude Code
+CLAUDE.md
+.claude/
+memory/
+
+.idea
+supervisord
+supervisord.exe
+test.log*
+.tags*
+debug
+go-debug.json
+vendor
+supervisord_linux_amd64
+upx
+dist

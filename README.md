@@ -1,10 +1,4 @@
-[![Go Report Card](https://goreportcard.com/badge/github.com/sgaunet/supervisord)](https://goreportcard.com/report/github.com/sgaunet/supervisord)
-
-# About This Fork
-
-This project is a continuation of the original [ochinchina/supervisord](https://github.com/ochinchina/supervisord) project. The goal is to update dependencies, add new functionalities, and modernize the codebase while maintaining compatibility with the original supervisor protocol.
-
-**Maintenance Approach**: Given limited time availability, this project leverages AI agents (like Claude Code) to assist with maintenance, refactoring, and feature development. This approach enables rapid iteration while maintaining code quality through automated testing and modern development practices.
+[![Go Report Card](https://goreportcard.com/badge/github.com/ochinchina/supervisord)](https://goreportcard.com/report/github.com/ochinchina/supervisord)
 
 # Why this project?
 
@@ -39,6 +33,8 @@ command = /your/program args
 $ supervisord -c supervisor.conf
 ```
 
+supervisord runs in the foreground unless `-d` is given. For compatibility with Python supervisord it also accepts `-n`/`--nodaemon` (run in the foreground; overrides `-d`) and `-e`/`--loglevel <level>` (overrides `loglevel` in the configuration file).
+
 Please note that config-file location autodetected in this order:
 
 1. $CWD/supervisord.conf
@@ -67,6 +63,14 @@ $ supervisord -c supervisor.conf -d
 In order to manage the daemon, you can use `supervisord ctl` subcommand, available subcommands are: `status`, `start`, `stop`, `shutdown`, `reload`.
 
 ```shell
+$ supervisord ctl add group-1 program-1
+$ supervisord ctl remove group-1 program-1
+$ supervisord ctl update
+$ supervisord ctl update group-1
+$ supervisord ctl update all
+$ supervisord ctl clear program-1 program-2
+$ supervisord ctl clear all
+$ supervisord ctl reread
 $ supervisord ctl status
 $ supervisord ctl status program-1 program-2...
 $ supervisord ctl status group:*
@@ -76,12 +80,19 @@ $ supervisord ctl stop all
 $ supervisord ctl start program-1 program-2...
 $ supervisord ctl start group:*
 $ supervisord ctl start all
+$ supervisord ctl restart program-1 program-2...
+$ supervisord ctl restart group:*
+$ supervisord ctl restart all
 $ supervisord ctl shutdown
 $ supervisord ctl reload
 $ supervisord ctl signal <signal_name> <process_name> <process_name> ...
-$ supervisord ctl signal all
+$ supervisord ctl signal <signal_name> all
+$ supervisord ctl pid
 $ supervisord ctl pid <process_name>
+$ supervisord ctl pid all
 $ supervisord ctl fg <process_name>
+$ supervisord ctl tail <process_name> [stdout|stderr]
+$ supervisord ctl tail -f <process_name> [stdout|stderr]
 ```
 
 Please note that `supervisor ctl` subcommand works correctly only if http server is enabled in [inet_http_server], and **serverurl** correctly set. Unix domain socket is not currently supported for this pupose.
@@ -119,6 +130,7 @@ Following parameters configured in "supervisord" section:
 - **logfile**. Where to put log of supervisord itself.
 - **logfile_maxbytes**. Rotate log-file after it exceeds this length.
 - **logfile_backups**. Number of rotated log-files to preserve.
+- **logfile_timestamp_suffix**. if it is true, the log file suffix will be in format 2006-01-02T15:04:05, otherwise the log file suffix will be in number from 1 to **logfile_backups**, default is true
 - **loglevel**. Logging verbosity, can be trace, debug, info, warning, error, fatal and panic (according to documentation of module used for this feature). Defaults to info.
 - **pidfile**. Full path to file containing process id of current supervisord instance.
 - **minfds**. Reserve al least this amount of file descriptors on supervisord startup. (Rlimit nofiles).
@@ -140,13 +152,16 @@ Supervised program settings configured in [program:programName] section and incl
 - **exitcodes**. The list of “expected” exit codes for this program used with autorestart. If the autorestart parameter is set to unexpected, and the process exits in any other way than as a result of a supervisor stop request, supervisord will restart the process if it exits with an exit code that is not defined in this list.
 - **stopsignal**. Signal to send to command to gracefully stop it. If more than one stopsignal is configured, when stoping the program, the supervisor will send the signals to the program one by one with interval "stopwaitsecs". If the program does not exit after all the signals sent to the program, supervisord will kill the program.
 - **stopwaitsecs**. Amount of time to wait before sending SIGKILL to supervised command to make it stop ungracefully.
+- **stdin**. Use the `string://`, `file://`, or `command://` methods to set the standard input value.
 - **stdout_logfile**. Where STDOUT of supervised command should be redirected. (Particular values described lower in this file).
 - **stdout_logfile_maxbytes**. Log size after exceed which log will be rotated.
 - **stdout_logfile_backups**. Number of rotated log-files to preserve.
+- **stdout_logfile_timestamp_suffix**. if it is true, the log file suffix will be in format 2006-01-02T15-04-05, otherwise the log file suffix will be in number from 1 to **stdout_logfile_backups**, default is true
 - **redirect_stderr**. Should STDERR be redirected to STDOUT.
 - **stderr_logfile**. Where STDERR of supervised command should be redirected. (Particular values described lower in this file).
 - **stderr_logfile_maxbytes**. Log size after exceed which log will be rotated.
 - **stderr_logfile_backups**. Number of rotated log-files to preserve.
+- **stderr_logfile_timestamp_suffix**. if it is true, the log file suffix will be in format 2006-01-02T15-04-05, otherwise the log file suffix will be in number from 1 to **stderr_logfile_backups**, default is true
 - **environment**. List of VARIABLE=value to be passed to supervised program. It has higher priority than `envFiles`.
 - **envFiles**. List of .env files to be loaded and passed to supervised program. 
 - **priority**. The relative priority of the program in the start and shutdown ordering
@@ -163,6 +178,24 @@ Supervised program settings configured in [program:programName] section and incl
 - **restart_cmd_when_file_changed**. The command to restart the program if any monitored files under **restart_directory_monitor** with pattern **restart_file_pattern** are changed.
 - **restart_signal_when_file_changed**. The signal will be sent to the proram, such as Nginx, for restarting if any monitored files under **restart_directory_monitor** with pattern **restart_file_pattern** are changed.
 - **depends_on**. Define supervised command start dependency. If program A depends on program B, C, the program B, C will be started before program A. Example:
+- **pre_start_hook** the script to run before starting the application.
+- **pre_stop_hook** the script to run before stopping the application.
+- **liveness check** parameters:
+    - **liveness_check_script** the script to be executed for liveness checking, it can be one of following format：
+        - http url, for example: http://127.0.0.1:8080/liveness -H "Content-Type: application/json" -d "this is data" --key-file <your-key-file.pem> --cert-file <your-cert-file.pem> --ca-file <your-ca-file.pem>
+        - tcp, for example: tcp://127.0.0.1：8080
+        - script, for example: /your/liveness/script.sh
+    - **liveness_check_initial_delay** how long to wait before performing the first liveness check, default is 60
+    - **liveness_check_period** how often the liveness check will be executed in seconds, default is 60
+    - **liveness_check_timeout** the script execute timeout in seconds, default is 30
+    - **liveness_check_success_threshold** minimum consecutive successes for the liveness check to be considered successful after having failed, default is 1
+    - **liveness_check_success_action** the script to be executed after the liveness check becomes success, default is nothing to do
+    - **liveness_check_failure_threshold** After a liveness check fails failureThreshold times successively, the program will be considered as failed
+    - **liveness_check_failure_action** action to be token if liveness check is failed, default is **restart** it can be one of:
+        - **restart** the program will be restarted
+        - **stop** the program will be stopped
+        - **script** the script to be executed
+    
 
 ```ini
 [program:A]
@@ -173,6 +206,8 @@ depends_on = B, C
 [program:C]
 ...
 ```
+- **pre_start_hook** the prestart hook script
+- **pre_stop_hook** the prestop hook script
 
 ## Set default parameters for all supervised programs
 
@@ -240,17 +275,33 @@ syslog_stderr_priority=err
 
 # Web GUI
 
-Supervisord has builtin web GUI: you can start, stop & check the status of program from the GUI. Following picture shows the default web GUI:
+Supervisord has builtin web GUI: you can start, stop & check the status of program from the GUI for one/multi supervisord instances. Following picture shows a GUI with two nodes:
 
-![alt text](https://github.com/sgaunet/supervisord/blob/master/go_supervisord_gui.png)
+![alt text](https://github.com/ochinchina/supervisord/blob/master/go_supervisord_gui.png)
 
 Please note that in order to see|use Web GUI you should configure it in /etc/supervisord.conf both in [inet_http_server] (and|or [unix_http_server] if you prefer unix domain socket) and [supervisorctl]:
 
+If you like to check status of another supervisord instances, you need to configure additional parameters in section **inet_http_server**:
+- **nodename** the node name which the supervisord is running, if it is not configured, it will be the host name of the supervisord is in running
+- **remote_x_node** the xth remote node name
+- **remote_x_port** the xth remote port
+- **remote_x_user** the xth remote username
+- **remote_x_password** the xth remote passwoed
+
 ```ini
 [inet_http_server]
+nodename=node-1
 port=127.0.0.1:9001
-;username=test1
-;password=thepassword
+username=test1
+password=thepassword
+remote_1_node=node-2
+remote_1_port=10.0.0.2:9001
+remote_1_user=test1
+remote_1_passwrod=test1
+remote_2_node=node-3
+remote_2_port=10.0.0.3:9001
+remote_2_user=test2
+remote_2_passwrod=test2
 
 [supervisorctl]
 serverurl=http://127.0.0.1:9001
@@ -262,8 +313,47 @@ supervisord is compiled inside a Docker image to be used directly inside another
 
 ```Dockerfile
 FROM debian:latest
-COPY --from=sgaunet/supervisord:latest /usr/local/bin/supervisord /usr/local/bin/supervisord
+COPY --from=ochinchina/supervisord:latest /usr/local/bin/supervisord /usr/local/bin/supervisord
 CMD ["/usr/local/bin/supervisord"]
+```
+
+# Integrate with Linux systemctl
+
+The supervisord can be integrated with the linux systemctl. The following supervisord.service is an example for the systemctl integration:
+
+```service
+[Unit]
+Description=Go Supervisord Process Manager
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/local/bin/supervisord -c /etc/supervisord.conf
+ExecStop=/usr/local/bin/supervisord shutdown
+ExecReload=/usr/local/bin/supervisord reload
+Restart=on-failure
+RestartSec=5s
+
+# Security and Limit Configurations
+LimitNOFILE=65536
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Put to supervisord binary to /usr/local/bin and the configuration file to /etc/supervisord.conf. And put the above supervisord.service to systemctl required directory, for example, the supervisord.service will be put to directory /usr/lib/systemd/system for the ubuntu linux family.
+
+Then the supervisord can be managed by systemctl and we can start/stop/restart it like:
+
+```shell
+systemctl daemon-reload
+systemctl start supervisord
+systemctl restart supervisord
+systemctl stop supervisord
 ```
 
 # Integrate with Prometheus

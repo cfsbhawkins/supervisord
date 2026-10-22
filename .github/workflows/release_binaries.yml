@@ -1,0 +1,116 @@
+name: Release Binaries
+
+on:
+  push:
+    tags:
+      - 'v*' # Triggers on release tags like v1.0.0, v0.1-beta, etc.
+  workflow_dispatch:
+
+permissions:
+  contents: write # Required to upload assets to GitHub Releases
+
+jobs:
+  build-and-release:
+    name: Build and Upload Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # Linux builds
+          - goos: linux
+            goarch: amd64
+            output_name: supervisord_linux_amd64
+          - goos: linux
+            goarch: arm
+            output_name: supervisord_linux_arm
+          - goos: linux
+            goarch: arm
+            goarm: "5"
+            output_name: supervisord_linux_armv5
+          - goos: linux
+            goarch: arm
+            goarm: "6"
+            output_name: supervisord_linux_armv6
+          - goos: linux
+            goarch: arm
+            goarm: "7"
+            output_name: supervisord_linux_armv7
+          - goos: linux
+            goarch: arm64
+            output_name: supervisord_linux_arm64
+          - goos: linux
+            goarch: "386"
+            output_name: supervisord_linux_i386
+
+          # Windows builds
+          - goos: windows
+            goarch: amd64
+            output_name: supervisord_windows_amd64.exe
+          - goos: windows
+            goarch: "386"
+            output_name: supervisord_windows_i386.exe
+
+          # macOS builds (Intel + Apple Silicon)
+          - goos: darwin
+            goarch: amd64
+            output_name: supervisord_darwin_amd64
+          - goos: darwin
+            goarch: arm64
+            output_name: supervisord_darwin_arm64
+
+          # --- FreeBSD Targets ---
+          - goos: freebsd
+            goarch: amd64
+            output_name: supervisord_freebsd_amd64
+          - goos: freebsd
+            goarch: arm64
+            output_name: supervisord_freebsd_arm64
+          - goos: freebsd
+            goarch: arm
+            goarm: "5"
+            output_name: supervisord_freebsd_arm5
+          - goos: freebsd
+            goarch: arm
+            goarm: "6"
+            output_name: supervisord_freebsd_arm6                        
+          - goos: freebsd
+            goarch: arm
+            goarm: "7"
+            output_name: supervisord_freebsd_arm7
+
+          # --- AIX Targets ---
+          - goos: aix
+            goarch: ppc64
+            output_name: supervisord_aix_ppc64            
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.27'
+
+      - name: Create dist directory
+        run: |
+          mkdir -p dist
+      - name: Build Binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          VERSION="${{ inputs.tag_name || github.ref_name }}"
+          COMMIT=$(git rev-parse --short HEAD)          
+          
+          go build -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+            -o dist/${{ matrix.output_name }}
+
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/${{ matrix.output_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
